@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	extentions_v1alpha1 "istio.io/client-go/pkg/apis/extensions/v1alpha1"
 	networking_v1alpha3 "istio.io/client-go/pkg/apis/networking/v1alpha3"
@@ -30,9 +29,6 @@ import (
 )
 
 const allResources string = "*"
-
-var ambientEnabled *bool
-var lastUpdateTime *time.Time
 
 type IstioConfigService struct {
 	userClients         map[string]kubernetes.ClientInterface
@@ -761,6 +757,9 @@ func (in *IstioConfigService) DeleteIstioConfigDetail(ctx context.Context, clust
 	// We need to refresh the kube cache though at least until waiting for the object to be updated is implemented.
 	kubeCache.Refresh(namespace)
 
+	// Remove validations for the object to refresh the validation cache.
+	in.kialiCache.Validations().Delete(models.IstioValidationKey{Name: name, Namespace: namespace, ObjectType: resourceType, Cluster: cluster})
+
 	return nil
 }
 
@@ -852,7 +851,13 @@ func (in *IstioConfigService) UpdateIstioConfigDetail(ctx context.Context, clust
 	// We need to refresh the kube cache though at least until waiting for the object to be updated is implemented.
 	kubeCache.Refresh(namespace)
 
-	return istioConfigDetail, err
+	// Re-run validations for that object to refresh the validation cache.
+	if _, _, err := in.businessLayer.Validations.GetIstioObjectValidations(ctx, cluster, namespace, resourceType, name); err != nil {
+		// Logging the error and swallowing it since the object was updated successfully.
+		log.Errorf("Error while validating Istio object: %s", err)
+	}
+
+	return istioConfigDetail, nil
 }
 
 func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, cluster, namespace, resourceType string, body []byte) (models.IstioConfigDetails, error) {
@@ -872,6 +877,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 		return istioConfigDetail, nil
 	}
 
+	var name string
 	switch resourceType {
 	case kubernetes.DestinationRules:
 		istioConfigDetail.DestinationRule = &networking_v1beta1.DestinationRule{}
@@ -880,6 +886,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.DestinationRule, err = userClient.Istio().NetworkingV1beta1().DestinationRules(namespace).Create(ctx, istioConfigDetail.DestinationRule, createOpts)
+		name = istioConfigDetail.DestinationRule.Name
 	case kubernetes.EnvoyFilters:
 		istioConfigDetail.EnvoyFilter = &networking_v1alpha3.EnvoyFilter{}
 		err = json.Unmarshal(body, istioConfigDetail.EnvoyFilter)
@@ -887,6 +894,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.EnvoyFilter, err = userClient.Istio().NetworkingV1alpha3().EnvoyFilters(namespace).Create(ctx, istioConfigDetail.EnvoyFilter, createOpts)
+		name = istioConfigDetail.EnvoyFilter.Name
 	case kubernetes.Gateways:
 		istioConfigDetail.Gateway = &networking_v1beta1.Gateway{}
 		err = json.Unmarshal(body, istioConfigDetail.Gateway)
@@ -894,6 +902,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.Gateway, err = userClient.Istio().NetworkingV1beta1().Gateways(namespace).Create(ctx, istioConfigDetail.Gateway, createOpts)
+		name = istioConfigDetail.Gateway.Name
 	case kubernetes.K8sGateways:
 		istioConfigDetail.K8sGateway = &k8s_networking_v1.Gateway{}
 		err = json.Unmarshal(body, istioConfigDetail.K8sGateway)
@@ -901,6 +910,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.K8sGateway, err = userClient.GatewayAPI().GatewayV1().Gateways(namespace).Create(ctx, istioConfigDetail.K8sGateway, createOpts)
+		name = istioConfigDetail.K8sGateway.Name
 	case kubernetes.K8sHTTPRoutes:
 		istioConfigDetail.K8sHTTPRoute = &k8s_networking_v1.HTTPRoute{}
 		err = json.Unmarshal(body, istioConfigDetail.K8sHTTPRoute)
@@ -908,6 +918,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.K8sHTTPRoute, err = userClient.GatewayAPI().GatewayV1().HTTPRoutes(namespace).Create(ctx, istioConfigDetail.K8sHTTPRoute, createOpts)
+		name = istioConfigDetail.K8sHTTPRoute.Name
 	case kubernetes.K8sReferenceGrants:
 		istioConfigDetail.K8sReferenceGrant = &k8s_networking_v1beta1.ReferenceGrant{}
 		err = json.Unmarshal(body, istioConfigDetail.K8sReferenceGrant)
@@ -915,6 +926,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.K8sReferenceGrant, err = userClient.GatewayAPI().GatewayV1beta1().ReferenceGrants(namespace).Create(ctx, istioConfigDetail.K8sReferenceGrant, createOpts)
+		name = istioConfigDetail.K8sReferenceGrant.Name
 	case kubernetes.ServiceEntries:
 		istioConfigDetail.ServiceEntry = &networking_v1beta1.ServiceEntry{}
 		err = json.Unmarshal(body, istioConfigDetail.ServiceEntry)
@@ -922,6 +934,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.ServiceEntry, err = userClient.Istio().NetworkingV1beta1().ServiceEntries(namespace).Create(ctx, istioConfigDetail.ServiceEntry, createOpts)
+		name = istioConfigDetail.ServiceEntry.Name
 	case kubernetes.Sidecars:
 		istioConfigDetail.Sidecar = &networking_v1beta1.Sidecar{}
 		err = json.Unmarshal(body, istioConfigDetail.Sidecar)
@@ -929,6 +942,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.Sidecar, err = userClient.Istio().NetworkingV1beta1().Sidecars(namespace).Create(ctx, istioConfigDetail.Sidecar, createOpts)
+		name = istioConfigDetail.Sidecar.Name
 	case kubernetes.VirtualServices:
 		istioConfigDetail.VirtualService = &networking_v1beta1.VirtualService{}
 		err = json.Unmarshal(body, istioConfigDetail.VirtualService)
@@ -936,6 +950,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.VirtualService, err = userClient.Istio().NetworkingV1beta1().VirtualServices(namespace).Create(ctx, istioConfigDetail.VirtualService, createOpts)
+		name = istioConfigDetail.VirtualService.Name
 	case kubernetes.WorkloadEntries:
 		istioConfigDetail.WorkloadEntry = &networking_v1beta1.WorkloadEntry{}
 		err = json.Unmarshal(body, istioConfigDetail.WorkloadEntry)
@@ -943,6 +958,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.WorkloadEntry, err = userClient.Istio().NetworkingV1beta1().WorkloadEntries(namespace).Create(ctx, istioConfigDetail.WorkloadEntry, createOpts)
+		name = istioConfigDetail.WorkloadEntry.Name
 	case kubernetes.WorkloadGroups:
 		istioConfigDetail.WorkloadGroup = &networking_v1beta1.WorkloadGroup{}
 		err = json.Unmarshal(body, istioConfigDetail.WorkloadGroup)
@@ -950,6 +966,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.WorkloadGroup, err = userClient.Istio().NetworkingV1beta1().WorkloadGroups(namespace).Create(ctx, istioConfigDetail.WorkloadGroup, createOpts)
+		name = istioConfigDetail.WorkloadGroup.Name
 	case kubernetes.WasmPlugins:
 		istioConfigDetail.WasmPlugin = &extentions_v1alpha1.WasmPlugin{}
 		err = json.Unmarshal(body, istioConfigDetail.WasmPlugin)
@@ -957,6 +974,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.WasmPlugin, err = userClient.Istio().ExtensionsV1alpha1().WasmPlugins(namespace).Create(ctx, istioConfigDetail.WasmPlugin, createOpts)
+		name = istioConfigDetail.WasmPlugin.Name
 	case kubernetes.Telemetries:
 		istioConfigDetail.Telemetry = &v1alpha1.Telemetry{}
 		err = json.Unmarshal(body, istioConfigDetail.Telemetry)
@@ -964,6 +982,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.Telemetry, err = userClient.Istio().TelemetryV1alpha1().Telemetries(namespace).Create(ctx, istioConfigDetail.Telemetry, createOpts)
+		name = istioConfigDetail.Telemetry.Name
 	case kubernetes.AuthorizationPolicies:
 		istioConfigDetail.AuthorizationPolicy = &security_v1beta1.AuthorizationPolicy{}
 		err = json.Unmarshal(body, istioConfigDetail.AuthorizationPolicy)
@@ -971,6 +990,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.AuthorizationPolicy, err = userClient.Istio().SecurityV1beta1().AuthorizationPolicies(namespace).Create(ctx, istioConfigDetail.AuthorizationPolicy, createOpts)
+		name = istioConfigDetail.AuthorizationPolicy.Name
 	case kubernetes.PeerAuthentications:
 		istioConfigDetail.PeerAuthentication = &security_v1beta1.PeerAuthentication{}
 		err = json.Unmarshal(body, istioConfigDetail.PeerAuthentication)
@@ -978,6 +998,7 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.PeerAuthentication, err = userClient.Istio().SecurityV1beta1().PeerAuthentications(namespace).Create(ctx, istioConfigDetail.PeerAuthentication, createOpts)
+		name = istioConfigDetail.PeerAuthentication.Name
 	case kubernetes.RequestAuthentications:
 		istioConfigDetail.RequestAuthentication = &security_v1beta1.RequestAuthentication{}
 		err = json.Unmarshal(body, istioConfigDetail.RequestAuthentication)
@@ -985,8 +1006,12 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 			return istioConfigDetail, api_errors.NewBadRequest(err.Error())
 		}
 		istioConfigDetail.RequestAuthentication, err = userClient.Istio().SecurityV1beta1().RequestAuthentications(namespace).Create(ctx, istioConfigDetail.RequestAuthentication, createOpts)
+		name = istioConfigDetail.RequestAuthentication.Name
 	default:
 		err = fmt.Errorf("object type not found: %v", resourceType)
+	}
+	if err != nil {
+		return istioConfigDetail, err
 	}
 
 	if in.config.ExternalServices.Istio.IstioAPIEnabled {
@@ -998,44 +1023,25 @@ func (in *IstioConfigService) CreateIstioConfigDetail(ctx context.Context, clust
 	// We need to refresh the kube cache though at least until waiting for the object to be updated is implemented.
 	kubeCache.Refresh(namespace)
 
-	return istioConfigDetail, err
+	// Re-run validations for that object to refresh the validation cache.
+	if _, _, err := in.businessLayer.Validations.GetIstioObjectValidations(ctx, cluster, namespace, resourceType, name); err != nil {
+		// Logging the error and swallowing it since the object was created successfully.
+		log.Errorf("Error while validating Istio object: %s", err)
+	}
+
+	return istioConfigDetail, nil
 }
 
 func (in *IstioConfigService) IsGatewayAPI(cluster string) bool {
 	return in.userClients[cluster].IsGatewayAPI()
 }
 
-func (in *IstioConfigService) GatewayAPIClasses() []config.GatewayAPIClass {
-	return kubernetes.GatewayAPIClasses(in.IsAmbientEnabled())
-
+func (in *IstioConfigService) GatewayAPIClasses(cluster string) []config.GatewayAPIClass {
+	return kubernetes.GatewayAPIClasses(in.IsAmbientEnabled(cluster))
 }
 
-// Check if istio Ambient profile was enabled
-// ATM it is defined in the istio-cni-config configmap
-func (in *IstioConfigService) IsAmbientEnabled() bool {
-	currentTime := time.Now()
-	if lastUpdateTime == nil {
-		lastUpdateTime = new(time.Time)
-		lastUpdateTime = &currentTime
-	}
-	if ambientEnabled == nil || currentTime.Sub(*lastUpdateTime) > time.Minute {
-		ambientEnabled = new(bool)
-		daemonset, err := in.kialiCache.GetDaemonSet(in.config.IstioNamespace, "ztunnel")
-		if err != nil {
-			log.Debugf("No ztunnel found in istio namespace: %s ", err.Error())
-		} else {
-			if daemonset != nil {
-				*ambientEnabled = true
-				return true
-			} else {
-				*ambientEnabled = false
-			}
-		}
-		lastUpdateTime = &currentTime
-	} else {
-		return *ambientEnabled
-	}
-	return false
+func (in *IstioConfigService) IsAmbientEnabled(cluster string) bool {
+	return in.kialiCache.IsAmbientEnabled(cluster)
 }
 
 func (in *IstioConfigService) GetIstioConfigPermissions(ctx context.Context, namespaces []string, cluster string) models.IstioConfigPermissions {
