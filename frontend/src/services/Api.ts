@@ -1,4 +1,4 @@
-import axios, {AxiosError} from 'axios';
+import axios, { AxiosError } from 'axios';
 import { config } from '../config';
 import { LoginSession } from '../store/Store';
 import { App } from '../types/App';
@@ -74,7 +74,7 @@ const loginHeaders = config.login.headers;
 
 /**  Helpers to Requests */
 
-const getHeaders = (urlEncoded?: boolean)  => {
+const getHeaders = (urlEncoded?: boolean) => {
   if (apiProxy || urlEncoded) {
     return { 'Content-Type': 'application/x-www-form-urlencoded', ...loginHeaders };
   }
@@ -86,10 +86,13 @@ const basicAuth = (username: UserName, password: Password) => {
 };
 
 const newRequest = <P>(method: HTTP_VERBS, url: string, queryParams: any, data: any) => {
+  // stringify request data that is not already stringified
+  const requestData = typeof data !== 'string' ? JSON.stringify(data) : data;
+
   return axios.request<P>({
     method: method,
     url: apiProxy ? `${apiProxy}/${url}` : url,
-    data: apiProxy ? JSON.stringify(data) : data,
+    data: requestData,
     headers: getHeaders(),
     params: queryParams
   });
