@@ -37,9 +37,11 @@ export const MastheadItems: React.FC = () => {
             <FlexItem style={{ marginLeft: '1rem' }}>
               <ThemeSwitch />
             </FlexItem>
-            <FlexItem>
-              <IstioStatus location={'masthead'} />
-            </FlexItem>
+            {homeCluster?.name && serverConfig.controlPlaneClusters.includes(homeCluster?.name) && (
+              <FlexItem>
+                <IstioStatus location={'masthead'} />
+              </FlexItem>
+            )}
             <FlexItem style={{ marginRight: 0 }}>
               <MessageCenterTrigger />
             </FlexItem>
