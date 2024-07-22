@@ -100,6 +100,10 @@ export class Menu extends React.Component<MenuProps, MenuState> {
           return graphEnablePatternfly;
         }
 
+        if (item.id === 'mesh') {
+          return serverConfig.controlPlaneClusters.length > 0;
+        }
+
         return true;
       })
       .map(item => {
