@@ -11,6 +11,16 @@ import { LanguageSwitch } from './LanguageSwitch';
 import { KialiIcon } from 'config/KialiIcon';
 import { useKialiTranslation } from 'utils/I18nUtils';
 import { PfSpinner } from 'components/Pf/PfSpinner';
+import { kialiStyle } from 'styles/StyleUtils';
+
+const toolbarStyle = kialiStyle({
+  marginLeft: 'auto',
+  $nest: {
+    '& .pf-v5-svg': {
+      fontSize: '1rem'
+    }
+  }
+});
 
 export const MastheadItems: React.FC = () => {
   const { t } = useKialiTranslation();
@@ -19,7 +29,7 @@ export const MastheadItems: React.FC = () => {
     <>
       <PfSpinner />
       <Toolbar>
-        <ToolbarItem style={{ marginLeft: 'auto' }}>
+        <ToolbarItem className={toolbarStyle}>
           <Flex>
             <FlexItem align={{ default: 'alignRight' }}>
               {homeCluster?.name && (
@@ -34,16 +44,16 @@ export const MastheadItems: React.FC = () => {
                 </Tooltip>
               )}
             </FlexItem>
-            <FlexItem style={{ marginLeft: '1rem' }}>
+            <FlexItem style={{ marginLeft: '1rem', marginRight: 0 }}>
               <ThemeSwitch />
             </FlexItem>
             <FlexItem>
               <IstioStatus location={'masthead'} />
             </FlexItem>
-            <FlexItem style={{ marginRight: 0 }}>
+            <FlexItem style={{ marginRight: '0.25rem' }}>
               <MessageCenterTrigger />
             </FlexItem>
-            <FlexItem style={{ marginRight: '0.75rem' }}>
+            <FlexItem style={{ marginRight: '0.5rem' }}>
               <HelpDropdown />
             </FlexItem>
             {serverConfig.kialiFeatureFlags.uiDefaults?.i18n?.showSelector && (
